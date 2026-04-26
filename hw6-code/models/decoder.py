@@ -26,7 +26,6 @@ class RNNDecoder(nn.Module):
         """
         super().__init__()
         self.hidden_dim = hidden_dim
-        # ============ TODO: Init layers ============
         # Decoder expects these layers:
         # - embedding: input embedding
         # - lstm: lstm cell
@@ -34,8 +33,12 @@ class RNNDecoder(nn.Module):
         # - init_c: linear projection to init cell state from image features
         # - dropout: output dropout layer
         # - fc: output linear projection
-        raise NotImplementedError
-        # ===========================================
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.lstm = rnn_cell(embed_dim, hidden_dim)
+        self.init_h = nn.Linear(feature_dim, hidden_dim)
+        self.init_c = nn.Linear(feature_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_dim, vocab_size)
 
         # initialize some layers with the uniform distribution
         self.embedding.weight.data.uniform_(-0.1, 0.1)
@@ -51,9 +54,9 @@ class RNNDecoder(nn.Module):
         Returns:
             tuple: (hidden_state, cell_state) both with shape (batch, hidden_dim).
         """
-        # ========== TODO: Init hidden states ==========
-        raise NotImplementedError
-        # ==============================================
+        mean_features = features.mean(dim=1)
+        h = self.init_h(mean_features)
+        c = self.init_c(mean_features)
         return h, c
 
     def forward(self, features: Tensor, captions: Tensor):
@@ -64,9 +67,8 @@ class RNNDecoder(nn.Module):
             captions (Tensor): Input captions with shape (batch, max_caption_length).
 
         Returns:
-            Tensor: Output predictions with shape (batch, max_caption_length, vocab_size).
+            Tensor: Output predictions with shape (batch, max_caption_length - 1, vocab_size).
         """
-        B = features.shape[0]
         T = captions.shape[1]
 
         # 词嵌入
@@ -77,11 +79,11 @@ class RNNDecoder(nn.Module):
         outputs: list[Tensor] = []
         # Decode step by step
         for t in range(T - 1):
-            # ======== TODO: implement decode step ========
             # Hint 1: apply dropout just before fc
             # Hint 2: use teacher-forcing here
-            raise NotImplementedError
-            # =============================================
+            h, c = self.lstm(embeddings[:, t, :], (h, c))
+            output = self.fc(self.dropout(h))
+            outputs.append(output)
 
         # 堆叠输出
         return torch.stack(outputs, dim=1)
@@ -117,13 +119,19 @@ class RNNDecoder(nn.Module):
 
             # 逐词生成
             for _ in range(max_len - 1):
-                # ======== TODO: implement generate step ========
                 # Hint 1: apply dropout just before fc
                 # Hint 2: a caption ends when it reaches the end token
                 # 1. 获取当前 predictions
                 # 2. 更新 captions
-                raise NotImplementedError
-                # =============================================
+                current_words = torch.tensor(
+                    [cap[-1] for cap in captions], dtype=torch.long, device=device
+                )
+                embeddings = self.embedding(current_words)
+                h, c = self.lstm(embeddings, (h, c))
+                predictions = self.fc(self.dropout(h)).argmax(dim=1)
+                for i, prediction in enumerate(predictions.tolist()):
+                    if captions[i][-1] != end_token:
+                        captions[i].append(prediction)
                 if all(cap[-1] == end_token for cap in captions):
                     break
 
@@ -138,7 +146,6 @@ class RNNDecoder(nn.Module):
                 # 初始化隐藏状态
                 h, c = self.init_hidden_state(img_features)
 
-                # ======== Optional TODO: implement beam search ========
                 # Hint: you may need to store beam as (log_prob, hidden_state, cell_state, tokens)
                 # 1. Initialize beam with start token
                 # 2. Repeat for max_len - 1 steps:
@@ -148,8 +155,40 @@ class RNNDecoder(nn.Module):
                 # 2.3. Sort beam by log probability, and keep top-k beams
                 # 2.4. Stop if all sequences end with end token
                 # 3. Select the sequence with highest log probability
-                raise NotImplementedError
-                # ======================================================
+                beam = [(0.0, h, c, [start_token])]
+                for _ in range(max_len - 1):
+                    candidates = []
+                    for score, h_b, c_b, tokens in beam:
+                        if tokens[-1] == end_token:
+                            candidates.append((score, h_b, c_b, tokens))
+                            continue
+
+                        current_word = torch.tensor(
+                            [tokens[-1]], dtype=torch.long, device=device
+                        )
+                        embedding = self.embedding(current_word)
+                        h_next, c_next = self.lstm(embedding, (h_b, c_b))
+                        logits = self.fc(self.dropout(h_next))
+                        log_probs = torch.log_softmax(logits, dim=1).squeeze(0)
+                        top_scores, top_words = log_probs.topk(beam_size)
+
+                        for log_prob, word in zip(top_scores, top_words):
+                            candidates.append(
+                                (
+                                    score + log_prob.item(),
+                                    h_next,
+                                    c_next,
+                                    tokens + [word.item()],
+                                )
+                            )
+
+                    beam = sorted(candidates, key=lambda item: item[0], reverse=True)[
+                        :beam_size
+                    ]
+                    if all(tokens[-1] == end_token for _, _, _, tokens in beam):
+                        break
+
+                captions.append(max(beam, key=lambda item: item[0])[3])
 
             return captions
 
@@ -178,7 +217,6 @@ class RNNDecoderWithAttention(nn.Module):
         """
         super().__init__()
         self.hidden_dim = hidden_dim
-        # ============ TODO: Init layers ============
         # Decoder expects these layers:
         # - embedding: input embedding
         # - lstm: lstm cell
@@ -187,8 +225,13 @@ class RNNDecoderWithAttention(nn.Module):
         # - init_c: linear projection to init cell state from image features
         # - dropout: output dropout layer
         # - fc: output linear projection
-        raise NotImplementedError
-        # ===========================================
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.lstm = rnn_cell(embed_dim + feature_dim, hidden_dim)
+        self.attention = attn_impl(feature_dim, hidden_dim)
+        self.init_h = nn.Linear(feature_dim, hidden_dim)
+        self.init_c = nn.Linear(feature_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_dim, vocab_size)
 
         # initialize some layers with the uniform distribution
         self.embedding.weight.data.uniform_(-0.1, 0.1)
@@ -204,10 +247,10 @@ class RNNDecoderWithAttention(nn.Module):
         Returns:
             tuple: (hidden_state, cell_state) both with shape (batch, hidden_dim).
         """
-        # ========== TODO: Init hidden states ==========
         # Same as RNNDecoder, you can copy the code
-        raise NotImplementedError
-        # ==============================================
+        mean_features = features.mean(dim=1)
+        h = self.init_h(mean_features)
+        c = self.init_c(mean_features)
         return h, c
 
     def forward(self, features: Tensor, captions: Tensor):
@@ -218,9 +261,8 @@ class RNNDecoderWithAttention(nn.Module):
             captions (Tensor): Input captions with shape (batch, max_caption_length).
 
         Returns:
-            Tensor: Output predictions with shape (batch, max_caption_length, vocab_size).
+            Tensor: Output predictions with shape (batch, max_caption_length - 1, vocab_size).
         """
-        B = features.shape[0]
         T = captions.shape[1]
 
         # 词嵌入
@@ -231,11 +273,13 @@ class RNNDecoderWithAttention(nn.Module):
         outputs = []
         # 逐词解码
         for t in range(T - 1):
-            # ======== TODO: implement decode step ========
             # Hint 1: apply dropout just before fc
             # Hint 2: use teacher-forcing here
-            raise NotImplementedError
-            # =============================================
+            context = self.attention(features, h)
+            lstm_input = torch.cat([embeddings[:, t, :], context], dim=1)
+            h, c = self.lstm(lstm_input, (h, c))
+            output = self.fc(self.dropout(h))
+            outputs.append(output)
 
         # 堆叠输出
         return torch.stack(outputs, dim=1)
@@ -271,13 +315,21 @@ class RNNDecoderWithAttention(nn.Module):
 
             # 逐词生成
             for _ in range(max_len - 1):
-                # ======== TODO: implement generate step ========
                 # Hint 1: apply dropout just before fc
                 # Hint 2: a caption ends when it reaches the end token
                 # 1. 获取当前 predictions
                 # 2. 更新 captions
-                raise NotImplementedError
-                # =============================================
+                current_words = torch.tensor(
+                    [cap[-1] for cap in captions], dtype=torch.long, device=device
+                )
+                embeddings = self.embedding(current_words)
+                context = self.attention(features, h)
+                lstm_input = torch.cat([embeddings, context], dim=1)
+                h, c = self.lstm(lstm_input, (h, c))
+                predictions = self.fc(self.dropout(h)).argmax(dim=1)
+                for i, prediction in enumerate(predictions.tolist()):
+                    if captions[i][-1] != end_token:
+                        captions[i].append(prediction)
                 if all(cap[-1] == end_token for cap in captions):
                     break
 
@@ -292,7 +344,6 @@ class RNNDecoderWithAttention(nn.Module):
                 # 初始化隐藏状态
                 h, c = self.init_hidden_state(img_features)
 
-                # ======== Optional TODO: implement beam search ========
                 # Hint: you may need to store beam as (log_prob, hidden_state, cell_state, tokens)
                 # 1. Initialize beam with start token
                 # 2. Repeat for max_len - 1 steps:
@@ -302,7 +353,41 @@ class RNNDecoderWithAttention(nn.Module):
                 # 2.3. Sort beam by log probability, and keep top-k beams
                 # 2.4. Stop if all sequences end with end token
                 # 3. Select the sequence with highest log probability
-                raise NotImplementedError
-                # ======================================================
+                beam = [(0.0, h, c, [start_token])]
+                for _ in range(max_len - 1):
+                    candidates = []
+                    for score, h_b, c_b, tokens in beam:
+                        if tokens[-1] == end_token:
+                            candidates.append((score, h_b, c_b, tokens))
+                            continue
+
+                        current_word = torch.tensor(
+                            [tokens[-1]], dtype=torch.long, device=device
+                        )
+                        embedding = self.embedding(current_word)
+                        context = self.attention(img_features, h_b)
+                        lstm_input = torch.cat([embedding, context], dim=1)
+                        h_next, c_next = self.lstm(lstm_input, (h_b, c_b))
+                        logits = self.fc(self.dropout(h_next))
+                        log_probs = torch.log_softmax(logits, dim=1).squeeze(0)
+                        top_scores, top_words = log_probs.topk(beam_size)
+
+                        for log_prob, word in zip(top_scores, top_words):
+                            candidates.append(
+                                (
+                                    score + log_prob.item(),
+                                    h_next,
+                                    c_next,
+                                    tokens + [word.item()],
+                                )
+                            )
+
+                    beam = sorted(candidates, key=lambda item: item[0], reverse=True)[
+                        :beam_size
+                    ]
+                    if all(tokens[-1] == end_token for _, _, _, tokens in beam):
+                        break
+
+                captions.append(max(beam, key=lambda item: item[0])[3])
 
             return captions

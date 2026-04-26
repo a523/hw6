@@ -13,10 +13,10 @@ class AdditiveAttention(nn.Module):
             hidden_dim (int): Hidden dimension.
         """
         super().__init__()
-        # ======== TODO: Init linear layers for attention ========
-        # 1. 实现 Wh, Wf, 用于映射隐藏状态和特征
-        # 2. 实现 v, 用于进行输出的线性映射
-        # ========================================================
+        # Wh/Wf map hidden state and image features into the same space.
+        self.Wf = nn.Linear(feature_dim, hidden_dim)
+        self.Wh = nn.Linear(hidden_dim, hidden_dim)
+        self.v = nn.Linear(hidden_dim, 1)
 
     def forward(self, features: Tensor, hidden: Tensor):
         """Forward pass of AdditiveAttention.
@@ -26,12 +26,14 @@ class AdditiveAttention(nn.Module):
             hidden (Tensor): Hidden state with shape (batch, hidden_dim).
 
         Returns:
-            Tensor: Attention output with shape (batch, num_pixels, hidden_dim).
+            Tensor: Attention output with shape (batch, feature_dim).
         """
-        # ============ TODO: forward pass ============
         # e = v * tanh(Wf * features + Wh * hidden)
         # alpha = softmax(e)
         # context = sum(alpha * features)
-        raise NotImplementedError
-        # ============================================
+        feature_attn = self.Wf(features)
+        hidden_attn = self.Wh(hidden).unsqueeze(1)
+        e = self.v(torch.tanh(feature_attn + hidden_attn)).squeeze(-1)
+        alpha = torch.softmax(e, dim=1).unsqueeze(-1)
+        context = torch.sum(alpha * features, dim=1)
         return context
