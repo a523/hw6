@@ -56,9 +56,9 @@ class Config:
     """Dataset directory."""
     output_dir: str = "output"
     """Output directory."""
-    finetune_encoder: bool = False
+    finetune_encoder: bool = True
     """Fine-tune encoder or not."""
-    use_attention: bool = False
+    use_attention: bool = True
     """Use attention or not."""
 
 
