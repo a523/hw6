@@ -1,21 +1,38 @@
 import torch
 import torchvision.models as models
 from torch import Tensor, nn
-from torchvision.models import ResNet50_Weights
 
 
 class Encoder(nn.Module):
-    """Encoder model."""
+    """Encoder model.
 
-    def __init__(self, encoded_size=(7, 7), finetune=False):
+    Supported backbones:
+        - "resnet50": torchvision ResNet-50, output (B, 49, 2048).
+        - "efficientnet_v2_s": torchvision EfficientNet-V2-S, output (B, 49, 1280).
+    """
+
+    def __init__(
+        self,
+        encoded_size: tuple[int, int] = (7, 7),
+        finetune: bool = False,
+        backbone: str = "resnet50",
+    ):
         super().__init__()
-        # 加载预训练 resnet
-        resnet = models.resnet50(weights=ResNet50_Weights.DEFAULT)
-        # 移除最后两层（平均池化和全连接层）
-        self.resnet = nn.Sequential(*list(resnet.children())[:-2])
-        # 自适应池化到固定尺寸
-        # self.pool = nn.AdaptiveAvgPool2d(encoded_size)
-        # 默认不微调
+        self.backbone_name = backbone
+        if backbone == "resnet50":
+            net = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+            # 去掉最后两层 (avgpool, fc)，保留卷积特征
+            self.backbone = nn.Sequential(*list(net.children())[:-2])
+            self._finetune_from = 5
+        elif backbone == "efficientnet_v2_s":
+            net = models.efficientnet_v2_s(
+                weights=models.EfficientNet_V2_S_Weights.DEFAULT
+            )
+            self.backbone = net.features
+            self._finetune_from = 5
+        else:
+            raise ValueError(f"Unsupported backbone: {backbone}")
+        self.pool = nn.AdaptiveAvgPool2d(encoded_size)
         self.finetune(finetune)
 
     def forward(self, images: Tensor):
@@ -27,17 +44,12 @@ class Encoder(nn.Module):
         Returns:
             Tensor: Extracted features with shape (batch, num_pixels, feature_dim).
         """
-        # 提取特征
-        x: Tensor = self.resnet(images)
-        # 池化到固定尺寸
-        # x: Tensor = self.pool(x)
-        # B C H W -> B (H W) C
+        x: Tensor = self.backbone(images)
+        x = self.pool(x)
         x = x.permute(0, 2, 3, 1).flatten(1, 2)
         return x
 
-    def finetune(self, finetune=True):
-        # 冻结所有参数
-        self.resnet.requires_grad_(False)
-        # 仅微调后几层
-        for child in list(self.resnet.children())[5:]:
+    def finetune(self, finetune: bool = True):
+        self.backbone.requires_grad_(False)
+        for child in list(self.backbone.children())[self._finetune_from :]:
             child.requires_grad_(finetune)

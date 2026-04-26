@@ -60,6 +60,8 @@ class Config:
     """Fine-tune encoder or not."""
     use_attention: bool = True
     """Use attention or not."""
+    encoder_backbone: str = "efficientnet_v2_s"
+    """Encoder backbone. Supported: "resnet50", "efficientnet_v2_s"."""
 
 
 def load_models(vocab_size: int, cfg: Config):
@@ -73,7 +75,11 @@ def load_models(vocab_size: int, cfg: Config):
         tuple[Module, Module]: Encoder and decoder.
     """
     device = cfg.device
-    encoder = Encoder(encoded_size=(7, 7), finetune=cfg.finetune_encoder).to(device)
+    encoder = Encoder(
+        encoded_size=(7, 7),
+        finetune=cfg.finetune_encoder,
+        backbone=cfg.encoder_backbone,
+    ).to(device)
 
     print("Trying to forward one dummy tensor to get the feature dimension...")
     dummy_features: Tensor = encoder(torch.zeros(1, 3, 224, 224, device=device))
