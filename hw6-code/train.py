@@ -29,11 +29,11 @@ class Config:
     """Batch size for training and testing."""
     num_workers: int = 12
     """Number of dataset loading workers."""
-    learning_rate: float = 5e-4
+    learning_rate: float = 2e-4
     """Learning rate (of decoder)."""
-    encoder_learning_rate: float = 1e-4
+    encoder_learning_rate: float = 2e-5
     """Encoder learning rate, used only when finetune_encoder=True."""
-    weight_decay: float = 1e-4
+    weight_decay: float = 5e-4
     """Weight decay."""
     num_epochs: int = 20
     """Number of training epochs."""
@@ -43,7 +43,7 @@ class Config:
     """Dimension of decoder hidden state."""
     grad_clip: float = 5.0
     """Grad clip norm."""
-    dropout: float = 0.2
+    dropout: float = 0.5
     """Dropout rate."""
     max_decode_len: int = 30
     """Maximum decode length. Default: 30."""
@@ -51,7 +51,6 @@ class Config:
     """Beam search. 1 for greedy decoding. Default: 1."""
     device: str = "cuda"
     """Which device to use."""
-    # TODO set directory to your own path
     dataset_dir: str = "data/flickr8k"
     """Dataset directory."""
     output_dir: str = "output"
